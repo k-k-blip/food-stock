@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>爆速！食材在庫プロトタイプ</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+    <style>
+        #interactive.viewport { position: relative; width: 100%; height: 250px; overflow: hidden; border-radius: 8px; background: #000; margin-bottom: 1rem; }
+        #interactive.viewport video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        canvas.drawingBuffer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .stock-list { margin-top: 1.5rem; }
+        .scan-success { background-color: #d4edda; color: #155724; padding: 0.5rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; display: none; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <h2>🛒 食材在庫・購入プロト</h2>
+        
+        <div id="scan-message" class="scan-success"></div>
+
+        <div id="interactive" class="viewport"></div>
+        
+        <div class="grid">
+            <button id="btn-scan" onclick="startScanner()">📷 スキャン開始</button>
+            <button id="btn-clear" class="secondary" onclick="clearAllData()">⚠️ データ初期化</button>
+        </div>
+
+        <section class="stock-list">
+            <h3>現在の在庫・購入リスト</h3>
+            <table role="grid">
+                <thead>
+                    <tr>
+                        <th>商品名 (バーコード)</th>
+                        <th style="width: 100px; text-align: center;">数量</th>
+                    </tr>
+                </thead>
+                <tbody id="stock-table-body">
+                    </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        // スマホ内の保存データ（商品辞書と、現在の在庫数）
+        let itemDictionary = JSON.parse(localStorage.getItem('itemDictionary')) || {};
+        let currentStock = JSON.parse(localStorage.getItem('currentStock')) || {};
+
+        // 起動時にリストを描画
+        updateStockTable();
+
+        // バーコードスキャン開始
+        function startScanner() {
+            document.getElementById('btn-scan').disabled = true;
+            document.getElementById('btn-scan').innerText = "スキャン中...";
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector('#interactive'),
+                    constraints: {
+                        facingMode: "environment" // 背面カメラを使用
+                    },
+                },
+                decoder: {
+                    readers: ["ean_reader", "ean_8_reader"] // 一般的なJANコード（13桁/8桁）に対応
+                }
+            }, function(err) {
+                if (err) {
+                    console.error(err);
+                    alert("カメラの起動に失敗しました。HTTPS環境か確認してください。");
+                    resetScanButton();
+                    return;
+                }
+                Quagga.start();
+            });
+        }
+
+        // バーコードを検知したときの処理
+        let isProcessing = false; // 連続読み込み防止ロック
+        Quagga.onDetected(function(result) {
+            if (isProcessing) return;
+            
+            const code = result.codeResult.code;
+            // JANコードの簡易チェック（正しい桁数か）
+            if (code.length !== 13 && code.length !== 8) return; 
+
+            isProcessing = true;
+            Quagga.stop(); // 一旦カメラを止める
+
+            // 効果音の代わりにスマホを少し振動させる（対応機種のみ）
+            if (navigator.vibrate) navigator.vibrate(200);
+
+            // 登録があるか確認
+            if (itemDictionary[code]) {
+                // 既に辞書にあるなら数量を+1
+                const name = itemDictionary[code];
+                currentStock[code] = (currentStock[code] || 0) + 1;
+                showScanMessage(`「${name}」を追加しました！`);
+                saveAndRefresh();
+            } else {
+                // 新しいバーコードなら名前を入力してもらう
+                // カメラ停止からプロンプト表示まで僅かに遅延を入れると挙動が安定します
+                setTimeout(() => {
+                    const name = prompt(`新しいバーコードを発見しました！\n商品名を入力してください:\n(${code})`);
+                    if (name && name.trim() !== "") {
+                        itemDictionary[code] = name.trim();
+                        currentStock[code] = 1;
+                        showScanMessage(`新規登録: 「${name}」を追加しました！`);
+                        saveAndRefresh();
+                    } else {
+                        // キャンセルされたら何もしない
+                        resetScanButton();
+                        isProcessing = false;
+                        startScanner();
+                    }
+                }, 500);
+            }
+        });
+
+        // データを保存して画面を更新
+        function saveAndRefresh() {
+            localStorage.setItem('itemDictionary', JSON.stringify(itemDictionary));
+            localStorage.setItem('currentStock', JSON.stringify(currentStock));
+            updateStockTable();
+            
+            // 2秒後に自動でスキャンを再開（連続スキャン対応）
+            setTimeout(() => {
+                isProcessing = false;
+                startScanner();
+            }, 200);
+        }
+
+        // 在庫テーブルの表示更新
+        function updateStockTable() {
+            const tbody = document.getElementById('stock-table-body');
+            tbody.innerHTML = "";
+
+            const codes = Object.keys(currentStock);
+            if (codes.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:gray;">リストは空です</td></tr>`;
+                return;
+            }
+
+            codes.forEach(code => {
+                const name = itemDictionary[code] || "未登録の商品";
+                const count = currentStock[code];
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${name}</strong><br><small style="color:gray;">${code}</small></td>
+                    <td style="text-align: center;">
+                        <button class="outline" style="padding:2px 10px; margin-right:5px;" onclick="changeCount('${code}', -1)">-</button>
+                        <span>${count}</span>
+                        <button class="outline" style="padding:2px 10px; margin-left:5px;" onclick="changeCount('${code}', 1)">+</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 数量のプラスマイナスボタン
+        function changeCount(code, amount) {
+            if (currentStock[code]) {
+                currentStock[code] += amount;
+                if (currentStock[code] <= 0) {
+                    delete currentStock[code]; // 0以下になったらリストから消す
+                }
+                localStorage.setItem('currentStock', JSON.stringify(currentStock));
+                updateStockTable();
+            }
+        }
+
+        // ボタン表示の戻し
+        function resetScanButton() {
+            document.getElementById('btn-scan').disabled = false;
+            document.getElementById('btn-scan').innerText = "📷 スキャン開始";
+        }
+
+        // スキャン成功時の簡易ポップアップ表示
+        function showScanMessage(msg) {
+            const el = document.getElementById('scan-message');
+            el.innerText = msg;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 3000);
+        }
+
+        // データの初期化
+        function clearAllData() {
+            if (confirm("登録した商品辞書とリストをすべて削除しますか？")) {
+                localStorage.clear();
+                itemDictionary = {};
+                currentStock = {};
+                updateStockTable();
+                alert("削除しました。");
+            }
+        }
+    </script>
+</body>
+</html>
