@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>爆速！Yahoo!検索 食材在庫プロト</title>
+    <title>爆速！Yahoo!検索 食材在庫プロト(CORS対策版)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
     <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
     <style>
@@ -105,24 +105,22 @@
 
                 showLoading(true);
                 try {
-                    // Yahoo!ショッピングの商品検索APIを呼び出す
-                    // (ブラウザからの直呼び出しによるCORSエラーを回避するため、Yahoo推奨のJSONPまたはCORSプロキシを経由する簡易構成にしています)
-                    const url = `https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${YAHOO_CLIENT_ID}&jan_code=${code}&hits=1`;
+                    // 【CORS対策】無料の中継サービス(corsproxy.io)を経由してYahoo! APIを叩きます
+                    const targetUrl = encodeURIComponent(`https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${YAHOO_CLIENT_ID}&jan_code=${code}&hits=1`);
+                    const url = `https://corsproxy.io/?${targetUrl}`;
+                    
                     const response = await fetch(url);
                     const data = await response.json();
                     
                     let productName = "";
                     
-                    // 検索結果から最初の商品名を取得
                     if (data && data.hits && data.hits.length > 0) {
                         productName = data.hits[0].name;
                     }
 
                     showLoading(false);
 
-                    // Yahooで見つかった場合
                     if (productName && productName.trim() !== "") {
-                        // 長すぎる商品名を少しスッキリさせる（任意）
                         if (productName.length > 30) productName = productName.substring(0, 30) + "...";
                         
                         itemDictionary[code] = productName.trim();
@@ -130,10 +128,9 @@
                         showScanMessage(`Yahoo!取得: 「${productName}」を追加しました！`);
                         saveAndRefresh();
                     } 
-                    // 見つからなかった場合のバックアップ（手動入力）
                     else {
                         setTimeout(() => {
-                            const name = prompt(`Yahoo!でも見つかりませんでした。\n商品名を入力してください:\n(${code})`);
+                            const name = prompt(`Yahoo!のデータベースに該当商品がありませんでした。\n商品名を入力してください:\n(${code})`);
                             if (name && name.trim() !== "") {
                                 itemDictionary[code] = name.trim();
                                 currentStock[code] = 1;
@@ -147,8 +144,7 @@
                 } catch (error) {
                     console.error(error);
                     showLoading(false);
-                    // 本格運用の際はCORS制限を回避するサーバーが必要になる場合がありますが、プロトタイプとしてまずはfetchを試みます
-                    alert("Yahoo! APIとの通信で制限が発生したか、エラーが起きました。手動入力に進みます。");
+                    alert("通信エラー、または該当商品がありません。手動入力に進みます。");
                     
                     const name = prompt(`商品名を入力してください:\n(${code})`);
                     if (name && name.trim() !== "") {
