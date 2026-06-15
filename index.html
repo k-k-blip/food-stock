@@ -3,209 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>爆速！Yahoo!検索 食材在庫プロト(CORS対策版)</title>
+    <title>安心安全！Gemini AIカメラプロト</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
     <style>
-        #interactive.viewport { position: relative; width: 100%; height: 250px; overflow: hidden; border-radius: 8px; background: #000; margin-bottom: 1rem; }
-        #interactive.viewport video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        canvas.drawingBuffer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-        .stock-list { margin-top: 1.5rem; }
-        .scan-success { background-color: #d4edda; color: #155724; padding: 0.5rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; display: none; }
+        body { padding-top: 1rem; }
+        #camera-wrapper { position: relative; width: 100%; height: 250px; overflow: hidden; border-radius: 8px; background: #000; margin-bottom: 1rem; }
+        #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 4px solid #4a90e2; border-radius: 8px; box-sizing: border-box; pointer-events: none; opacity: 0.5; }
+        .grid { margin-bottom: 1rem; }
+        #canvas-hidden { display: none; }
         .scan-loading { background-color: #fff3cd; color: #856404; padding: 0.5rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; display: none; }
+        .scan-success { background-color: #d4edda; color: #155724; padding: 0.5rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; display: none; }
+        .key-section { background: #f4f6f8; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
     </style>
 </head>
 <body>
     <main class="container">
-        <h2>🛒 Yahoo!連携 食材在庫プロト</h2>
-        
-        <div id="scan-message" class="scan-success"></div>
-        <div id="loading-message" class="scan-loading">⏳ Yahoo!ショッピングから爆速検索中...</div>
+        <h2>🛍️ Gemini スマホAIカメラ</h2>
 
-        <div id="interactive" class="viewport"></div>
+        <details id="key-details" class="key-section">
+            <summary>🔑 最初に入鍵：Gemini APIキー設定</summary>
+            <label for="api-key-input">Google AI Studioで取得したキーを入力してください：</label>
+            <input type="password" id="api-key-input" placeholder="AIzaSy...">
+            <button onclick="saveApiKey()">キーを保存してカメラ起動</button>
+        </details>
+
+        <div id="loading-message" class="scan-loading">⏳ Geminiが画像から商品を特定中...</div>
+        <div id="scan-message" class="scan-success"></div>
+
+        <div id="camera-wrapper">
+            <video id="video" autoplay playsinline></video>
+            <div id="overlay"></div>
+        </div>
         
         <div class="grid">
-            <button id="btn-scan" onclick="startScanner()">📷 スキャン開始</button>
+            <button id="btn-snap" onclick="captureAndIdentify()" style="background-color: #4a90e2; border: none;">📸 写真を撮ってAI認識</button>
             <button id="btn-clear" class="secondary" onclick="clearAllData()">⚠️ データ初期化</button>
         </div>
+
+        <canvas id="canvas-hidden"></canvas>
 
         <section class="stock-list">
             <h3>現在の在庫・購入リスト</h3>
             <table role="grid">
                 <thead>
                     <tr>
-                        <th>商品名 (バーコード)</th>
+                        <th>商品名</th>
                         <th style="width: 100px; text-align: center;">数量</th>
                     </tr>
                 </thead>
                 <tbody id="stock-table-body">
-                    </tbody>
+                </tbody>
             </table>
         </section>
     </main>
 
     <script>
-        // ⚠️ 【重要】ここにYahoo!で取得したアプリケーションIDを貼り付けてください
-        const YAHOO_CLIENT_ID = 'dmVyPTIwMjUwNyZpZD1pcXdMdkNOalJmJmhhc2g9TXpZeVpqa3haR0ptWWpOak1HVmhZUQ';
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas-hidden');
+        let itemDictionary = JSON.parse(localStorage.getItem('itemDictionary_gemini_mobile')) || {};
+        let currentStock = JSON.parse(localStorage.getItem('currentStock_gemini_mobile')) || {};
 
-        let itemDictionary = JSON.parse(localStorage.getItem('itemDictionary')) || {};
-        let currentStock = JSON.parse(localStorage.getItem('currentStock')) || {};
+        // 起動時に保存されているキーがあればセット
+        let geminiApiKey = localStorage.getItem('gemini_api_key') || '';
+        if (geminiApiKey) {
+            document.getElementById('api-key-input').value = geminiApiKey;
+            document.getElementById('key-details').open = false; // 閉じる
+            initCamera();
+        } else {
+            document.getElementById('key-details').open = true; // キーがない場合は開く
+        }
 
         updateStockTable();
 
-        function startScanner() {
-            document.getElementById('btn-scan').disabled = true;
-            document.getElementById('btn-scan').innerText = "スキャン中...";
-
-            Quagga.init({
-                inputStream: {
-                    name: "Live",
-                    type: "LiveStream",
-                    target: document.querySelector('#interactive'),
-                    constraints: { facingMode: "environment" },
-                },
-                decoder: { readers: ["ean_reader", "ean_8_reader"] }
-            }, function(err) {
-                if (err) {
-                    console.error(err);
-                    alert("カメラの起動に失敗しました。");
-                    resetScanButton();
-                    return;
-                }
-                Quagga.start();
-            });
+        // キーをスマホ（ブラウザ）に安全に保存
+        function saveApiKey() {
+            const key = document.getElementById('api-key-input').value.trim();
+            if (key) {
+                localStorage.setItem('gemini_api_key', key);
+                geminiApiKey = key;
+                document.getElementById('key-details').open = false;
+                alert("キーを保存しました。カメラを起動します。");
+                initCamera();
+            }
         }
 
-        let isProcessing = false;
-        Quagga.onDetected(async function(result) {
-            if (isProcessing) return;
-            
-            const code = result.codeResult.code;
-            if (code.length !== 13 && code.length !== 8) return; 
+        // カメラの初期化
+        function initCamera() {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(stream => { video.srcObject = stream; })
+                .catch(err => { alert("カメラの起動に失敗しました。ブラウザのカメラ権限を許可してください。"); console.error(err); });
+        }
 
-            isProcessing = true;
-            Quagga.stop(); 
+        // 写真を撮ってGeminiに送る処理
+        async function captureAndIdentify() {
+            if (!geminiApiKey) {
+                alert("先にGeminiのAPIキーを入力して保存してください。");
+                document.getElementById('key-details').open = true;
+                return;
+            }
 
+            const btnSnap = document.getElementById('btn-snap');
+            btnSnap.disabled = true;
+            btnSnap.innerText = "認識中...";
+            showLoading(true);
+
+            video.pause();
             if (navigator.vibrate) navigator.vibrate(200);
 
-            // 1. すでにアプリ内の辞書にある場合
-            if (itemDictionary[code]) {
-                const name = itemDictionary[code];
-                currentStock[code] = (currentStock[code] || 0) + 1;
-                showScanMessage(`「${name}」を追加しました！`);
-                saveAndRefresh();
-            } 
-            // 2. 初めて読むバーコードの場合（Yahoo!で検索）
-            else {
-                if (YAHOO_CLIENT_ID === 'ここにあなたのIDを入れる') {
-                    alert("Yahoo!のアプリケーションIDが設定されていません。コード内のYAHOO_CLIENT_IDを設定してください。");
-                    resumeScanning();
-                    return;
-                }
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                showLoading(true);
-                try {
-                    // 【CORS対策】無料の中継サービス(corsproxy.io)を経由してYahoo! APIを叩きます
-                    const targetUrl = encodeURIComponent(`https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=${YAHOO_CLIENT_ID}&jan_code=${code}&hits=1`);
-                    const url = `https://corsproxy.io/?${targetUrl}`;
-                    
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    
-                    let productName = "";
-                    
-                    if (data && data.hits && data.hits.length > 0) {
-                        productName = data.hits[0].name;
-                    }
+            const base64Image = canvas.toDataURL('image/jpeg', 0.7).split(',')[1]; // スマホ回線用に少し軽め(0.7)にする
 
-                    showLoading(false);
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: "この画像に写っている食品または日用品のうち、最も大きく写っている商品の「具体的な商品名（例：明治おいしい牛乳、ポテトチップス うすしお味）」を、日本語で1つだけ答えてください。解説や『商品名：』などの余計な文字は一切含めず、名前の単語のみを出力してください。" },
+                                {
+                                    inlineData: {
+                                        mimeType: "image/jpeg",
+                                        data: base64Image
+                                    }
+                                }
+                            ]
+                        }]
+                    })
+                });
 
-                    if (productName && productName.trim() !== "") {
-                        if (productName.length > 30) productName = productName.substring(0, 30) + "...";
-                        
-                        itemDictionary[code] = productName.trim();
-                        currentStock[code] = 1;
-                        showScanMessage(`Yahoo!取得: 「${productName}」を追加しました！`);
-                        saveAndRefresh();
-                    } 
-                    else {
-                        setTimeout(() => {
-                            const name = prompt(`Yahoo!のデータベースに該当商品がありませんでした。\n商品名を入力してください:\n(${code})`);
-                            if (name && name.trim() !== "") {
-                                itemDictionary[code] = name.trim();
-                                currentStock[code] = 1;
-                                showScanMessage(`新規登録: 「${name}」を追加しました！`);
-                                saveAndRefresh();
-                            } else {
-                                resumeScanning();
-                            }
-                        }, 500);
-                    }
-                } catch (error) {
-                    console.error(error);
-                    showLoading(false);
-                    alert("通信エラー、または該当商品がありません。手動入力に進みます。");
-                    
-                    const name = prompt(`商品名を入力してください:\n(${code})`);
-                    if (name && name.trim() !== "") {
-                        itemDictionary[code] = name.trim();
-                        currentStock[code] = 1;
+                const data = await response.json();
+                video.play();
+
+                if (data.candidates && data.candidates[0].content.parts[0].text) {
+                    let productName = data.candidates[0].content.parts[0].text.trim();
+                    productName = productName.replace(/[\n\r➔」〟『』「。,：*]/g, "");
+
+                    if (productName && productName !== "") {
+                        itemDictionary[productName] = true;
+                        currentStock[productName] = (currentStock[productName] || 0) + 1;
+                        showScanMessage(`Gemini認識: 「${productName}」を追加！`);
                         saveAndRefresh();
                     } else {
-                        resumeScanning();
+                        alert("商品を特定できませんでした。もう一度撮影してください。");
                     }
+                } else {
+                    console.error(data);
+                    alert("認識に失敗しました。画像が大きすぎるか、キーの残高不足の可能性があります。");
                 }
-            }
-        });
 
-        function saveAndRefresh() {
-            localStorage.setItem('itemDictionary', JSON.stringify(itemDictionary));
-            localStorage.setItem('currentStock', JSON.stringify(currentStock));
-            updateStockTable();
-            setTimeout(() => { resumeScanning(); }, 1500);
+            } catch (error) {
+                console.error(error);
+                video.play();
+                alert("Geminiとの通信エラーが発生しました。");
+            } finally {
+                showLoading(false);
+                btnSnap.disabled = false;
+                btnSnap.innerText = "📸 写真を撮ってAI認識";
+            }
         }
 
-        function resumeScanning() {
-            isProcessing = false;
-            startScanner();
+        function saveAndRefresh() {
+            localStorage.setItem('itemDictionary_gemini_mobile', JSON.stringify(itemDictionary));
+            localStorage.setItem('currentStock_gemini_mobile', JSON.stringify(currentStock));
+            updateStockTable();
         }
 
         function updateStockTable() {
             const tbody = document.getElementById('stock-table-body');
             tbody.innerHTML = "";
-            const codes = Object.keys(currentStock);
-            if (codes.length === 0) {
+            const names = Object.keys(currentStock);
+            if (names.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:gray;">リストは空です</td></tr>`;
                 return;
             }
-            codes.forEach(code => {
-                const name = itemDictionary[code] || "未登録の商品";
-                const count = currentStock[code];
+            names.forEach(name => {
+                const count = currentStock[name];
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td><strong>${name}</strong><br><small style="color:gray;">${code}</small></td>
+                    <td><strong>${name}</strong></td>
                     <td style="text-align: center;">
-                        <button class="outline" style="padding:2px 10px; margin-right:5px;" onclick="changeCount('${code}', -1)">-</button>
+                        <button class="outline" style="padding:2px 10px; margin-right:5px;" onclick="changeCount('${name}', -1)">-</button>
                         <span>${count}</span>
-                        <button class="outline" style="padding:2px 10px; margin-left:5px;" onclick="changeCount('${code}', 1)">+</button>
+                        <button class="outline" style="padding:2px 10px; margin-left:5px;" onclick="changeCount('${name}', 1)">+</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
             });
         }
 
-        function changeCount(code, amount) {
-            if (currentStock[code]) {
-                currentStock[code] += amount;
-                if (currentStock[code] <= 0) delete currentStock[code];
-                localStorage.setItem('currentStock', JSON.stringify(currentStock));
+        function changeCount(name, amount) {
+            if (currentStock[name]) {
+                currentStock[name] += amount;
+                if (currentStock[name] <= 0) delete currentStock[name];
+                localStorage.setItem('currentStock_gemini_mobile', JSON.stringify(currentStock));
                 updateStockTable();
             }
-        }
-
-        function resetScanButton() {
-            document.getElementById('btn-scan').disabled = false;
-            document.getElementById('btn-scan').innerText = "📷 スキャン開始";
         }
 
         function showScanMessage(msg) {
@@ -220,10 +220,13 @@
         }
 
         function clearAllData() {
-            if (confirm("登録した商品辞書とリストをすべて削除しますか？")) {
+            if (confirm("登録した商品リストとAPIキーをすべて削除しますか？")) {
                 localStorage.clear();
                 itemDictionary = {};
                 currentStock = {};
+                geminiApiKey = '';
+                document.getElementById('api-key-input').value = '';
+                document.getElementById('key-details').open = true;
                 updateStockTable();
                 alert("削除しました。");
             }
