@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安心安全！Gemini AIカメラプロト</title>
+    <title>軽量化版！Gemini スマホAIカメラ</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
     <style>
         body { padding-top: 1rem; }
@@ -64,19 +64,17 @@
         let itemDictionary = JSON.parse(localStorage.getItem('itemDictionary_gemini_mobile')) || {};
         let currentStock = JSON.parse(localStorage.getItem('currentStock_gemini_mobile')) || {};
 
-        // 起動時に保存されているキーがあればセット
         let geminiApiKey = localStorage.getItem('gemini_api_key') || '';
         if (geminiApiKey) {
             document.getElementById('api-key-input').value = geminiApiKey;
-            document.getElementById('key-details').open = false; // 閉じる
+            document.getElementById('key-details').open = false;
             initCamera();
         } else {
-            document.getElementById('key-details').open = true; // キーがない場合は開く
+            document.getElementById('key-details').open = true;
         }
 
         updateStockTable();
 
-        // キーをスマホ（ブラウザ）に安全に保存
         function saveApiKey() {
             const key = document.getElementById('api-key-input').value.trim();
             if (key) {
@@ -88,14 +86,12 @@
             }
         }
 
-        // カメラの初期化
         function initCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
                 .then(stream => { video.srcObject = stream; })
-                .catch(err => { alert("カメラの起動に失敗しました。ブラウザのカメラ権限を許可してください。"); console.error(err); });
+                .catch(err => { alert("カメラの起動に失敗しました。"); console.error(err); });
         }
 
-        // 写真を撮ってGeminiに送る処理
         async function captureAndIdentify() {
             if (!geminiApiKey) {
                 alert("先にGeminiのAPIキーを入力して保存してください。");
@@ -112,11 +108,31 @@
             if (navigator.vibrate) navigator.vibrate(200);
 
             const context = canvas.getContext('2d');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // 💡【CORS・容量対策】縦横の上限を最大640pxに制限し、AIが処理しやすいサイズに強制圧縮します
+            const MAX_WIDTH = 640;
+            const MAX_HEIGHT = 640;
+            let width = video.videoWidth;
+            let height = video.videoHeight;
 
-            const base64Image = canvas.toDataURL('image/jpeg', 0.7).split(',')[1]; // スマホ回線用に少し軽め(0.7)にする
+            if (width > height) {
+                if (width > MAX_WIDTH) {
+                    height *= MAX_WIDTH / width;
+                    width = MAX_WIDTH;
+                }
+            } else {
+                if (height > MAX_HEIGHT) {
+                    width *= MAX_HEIGHT / height;
+                    height = MAX_HEIGHT;
+                }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            context.drawImage(video, 0, 0, width, height);
+
+            // 画質を 0.5（適度に荒く）まで落としてデータ量を数分の1にします
+            const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
 
             try {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
@@ -127,7 +143,7 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                { text: "この画像に写っている食品または日用品のうち、最も大きく写っている商品の「具体的な商品名（例：明治おいしい牛乳、ポテトチップス うすしお味）」を、日本語で1つだけ答えてください。解説や『商品名：』などの余計な文字は一切含めず、名前の単語のみを出力してください。" },
+                                { text: "この画像に写っている食品または日用品のうち、最も目立っている商品の「一般的な具体的な商品名（例：明治おいしい牛乳、コカコーラ、ポテトチップス うすしお味）」を日本語で1つだけ答えてください。説明や挨拶、『商品名：』などの余計な文字は絶対に含めず、名前の単語のみを最短で出力してください。" },
                                 {
                                     inlineData: {
                                         mimeType: "image/jpeg",
@@ -144,7 +160,7 @@
 
                 if (data.candidates && data.candidates[0].content.parts[0].text) {
                     let productName = data.candidates[0].content.parts[0].text.trim();
-                    productName = productName.replace(/[\n\r➔」〟『』「。,：*]/g, "");
+                    productName = productName.replace(/[\n\r➔」〟『』「。,：*#-]/g, "");
 
                     if (productName && productName !== "") {
                         itemDictionary[productName] = true;
@@ -156,7 +172,7 @@
                     }
                 } else {
                     console.error(data);
-                    alert("認識に失敗しました。画像が大きすぎるか、キーの残高不足の可能性があります。");
+                    alert("認識に失敗しました。別の角度から試すか、部屋を明るくしてみてください。");
                 }
 
             } catch (error) {
