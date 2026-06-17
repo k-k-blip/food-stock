@@ -3,33 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>軽量化版！Gemini スマホAIカメラ</title>
+    <title>診断機能付き！Gemini スマホAIカメラ</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
     <style>
         body { padding-top: 1rem; }
         #camera-wrapper { position: relative; width: 100%; height: 250px; overflow: hidden; border-radius: 8px; background: #000; margin-bottom: 1rem; }
         #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 4px solid #4a90e2; border-radius: 8px; box-sizing: border-box; pointer-events: none; opacity: 0.5; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 4px solid #e67e22; border-radius: 8px; box-sizing: border-box; pointer-events: none; opacity: 0.5; }
         .grid { margin-bottom: 1rem; }
         #canvas-hidden { display: none; }
         .scan-loading { background-color: #fff3cd; color: #856404; padding: 0.5rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; display: none; }
         .scan-success { background-color: #d4edda; color: #155724; padding: 0.5rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; display: none; }
         .key-section { background: #f4f6f8; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        #error-log { background: #fde8e8; color: #9b1c1c; padding: 0.5rem; border-radius: 4px; font-size: 0.8rem; margin-top: 0.5rem; display: none; word-break: break-all; }
     </style>
 </head>
 <body>
     <main class="container">
-        <h2>🛍️ Gemini スマホAIカメラ</h2>
+        <h2>🛍️ Gemini スマホAIカメラ (診断版)</h2>
 
         <details id="key-details" class="key-section">
-            <summary>🔑 最初に入鍵：Gemini APIキー設定</summary>
-            <label for="api-key-input">Google AI Studioで取得したキーを入力してください：</label>
+            <summary>🔑 Gemini APIキー設定</summary>
+            <label for="api-key-input">Google AI Studioのキー(AIzaSy...):</label>
             <input type="password" id="api-key-input" placeholder="AIzaSy...">
             <button onclick="saveApiKey()">キーを保存してカメラ起動</button>
+            <button class="secondary" onclick="testTextApi()" style="margin-top:0.5rem;">🧪 キーの接続テスト(文字のみ)</button>
         </details>
 
         <div id="loading-message" class="scan-loading">⏳ Geminiが画像から商品を特定中...</div>
         <div id="scan-message" class="scan-success"></div>
+        <div id="error-log"></div>
 
         <div id="camera-wrapper">
             <video id="video" autoplay playsinline></video>
@@ -37,7 +40,7 @@
         </div>
         
         <div class="grid">
-            <button id="btn-snap" onclick="captureAndIdentify()" style="background-color: #4a90e2; border: none;">📸 写真を撮ってAI認識</button>
+            <button id="btn-snap" onclick="captureAndIdentify()" style="background-color: #e67e22; border: none;">📸 写真を撮ってAI認識</button>
             <button id="btn-clear" class="secondary" onclick="clearAllData()">⚠️ データ初期化</button>
         </div>
 
@@ -61,6 +64,7 @@
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas-hidden');
+        const errorLog = document.getElementById('error-log');
         let itemDictionary = JSON.parse(localStorage.getItem('itemDictionary_gemini_mobile')) || {};
         let currentStock = JSON.parse(localStorage.getItem('currentStock_gemini_mobile')) || {};
 
@@ -81,6 +85,7 @@
                 localStorage.setItem('gemini_api_key', key);
                 geminiApiKey = key;
                 document.getElementById('key-details').open = false;
+                errorLog.style.display = 'none';
                 alert("キーを保存しました。カメラを起動します。");
                 initCamera();
             }
@@ -89,50 +94,76 @@
         function initCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
                 .then(stream => { video.srcObject = stream; })
-                .catch(err => { alert("カメラの起動に失敗しました。"); console.error(err); });
+                .catch(err => { alert("カメラ起動失敗。ブラウザの設定でカメラを許可してください。"); console.error(err); });
+        }
+
+        // 🧪 テスト機能：カメラを使わず、APIキーが生きているか文字だけで確認する
+        async function testTextApi() {
+            const key = document.getElementById('api-key-input').value.trim();
+            if (!key) { alert("先にキーを入力してください"); return; }
+            
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: "「通信成功」とだけ返してください" }] }] })
+                });
+                const data = await response.json();
+                if(data.candidates && data.candidates[0].content.parts[0].text) {
+                    alert("🎉 キーの接続テスト成功！AIからの返答: " + data.candidates[0].content.parts[0].text.trim());
+                } else {
+                    showRawError(data);
+                }
+            } catch(e) {
+                alert("通信エラーが発生しました。ログを確認してください。");
+                errorLog.innerText = e.toString();
+                errorLog.style.display = 'block';
+            }
+        }
+
+        function showRawError(data) {
+            errorLog.innerText = "【Googleからのエラー応答】\n" + JSON.stringify(data, null, 2);
+            errorLog.style.display = 'block';
         }
 
         async function captureAndIdentify() {
-            if (!geminiApiKey) {
-                alert("先にGeminiのAPIキーを入力して保存してください。");
-                document.getElementById('key-details').open = true;
-                return;
-            }
+            if (!geminiApiKey) { alert("先にAPIキーを設定してください。"); return; }
 
             const btnSnap = document.getElementById('btn-snap');
             btnSnap.disabled = true;
             btnSnap.innerText = "認識中...";
             showLoading(true);
+            errorLog.style.display = 'none';
 
             video.pause();
             if (navigator.vibrate) navigator.vibrate(200);
 
             const context = canvas.getContext('2d');
-            
-            // 💡【CORS・容量対策】縦横の上限を最大640pxに制限し、AIが処理しやすいサイズに強制圧縮します
-            const MAX_WIDTH = 640;
-            const MAX_HEIGHT = 640;
-            let width = video.videoWidth;
-            let height = video.videoHeight;
+            const MAX_WIDTH = 500; // さらに軽量化
+            let width = video.videoWidth || 640;
+            let height = video.videoHeight || 480;
 
-            if (width > height) {
-                if (width > MAX_WIDTH) {
-                    height *= MAX_WIDTH / width;
-                    width = MAX_WIDTH;
-                }
-            } else {
-                if (height > MAX_HEIGHT) {
-                    width *= MAX_HEIGHT / height;
-                    height = MAX_HEIGHT;
-                }
+            if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
             }
 
             canvas.width = width;
             canvas.height = height;
             context.drawImage(video, 0, 0, width, height);
 
-            // 画質を 0.5（適度に荒く）まで落としてデータ量を数分の1にします
-            const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
+            const base64Image = canvas.toDataURL('image/jpeg', 0.4).split(',')[1];
+
+            // 万が一画像が真っ白・空っぽだった場合のチェック
+            if(!base64Image || base64Image.length < 100) {
+                alert("エラー：カメラ画像の取得に失敗しました。ブラウザを変更するか、ページを再読み込みしてください。");
+                video.play();
+                showLoading(false);
+                btnSnap.disabled = false;
+                btnSnap.innerText = "📸 写真を撮ってAI認識";
+                return;
+            }
 
             try {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
@@ -143,13 +174,8 @@
                     body: JSON.stringify({
                         contents: [{
                             parts: [
-                                { text: "この画像に写っている食品または日用品のうち、最も目立っている商品の「一般的な具体的な商品名（例：明治おいしい牛乳、コカコーラ、ポテトチップス うすしお味）」を日本語で1つだけ答えてください。説明や挨拶、『商品名：』などの余計な文字は絶対に含めず、名前の単語のみを最短で出力してください。" },
-                                {
-                                    inlineData: {
-                                        mimeType: "image/jpeg",
-                                        data: base64Image
-                                    }
-                                }
+                                { text: "画像に写っている商品の「具体的な商品名（例：明治おいしい牛乳、ポテトチップス うすしお味）」を日本語で1つだけ答えてください。説明や挨拶は含めず、名前のみを出力してください。" },
+                                { inlineData: { mimeType: "image/jpeg", data: base64Image } }
                             ]
                         }]
                     })
@@ -168,17 +194,20 @@
                         showScanMessage(`Gemini認識: 「${productName}」を追加！`);
                         saveAndRefresh();
                     } else {
-                        alert("商品を特定できませんでした。もう一度撮影してください。");
+                        alert("商品を特定できませんでした。別の角度から試してください。");
                     }
                 } else {
-                    console.error(data);
-                    alert("認識に失敗しました。別の角度から試すか、部屋を明るくしてみてください。");
+                    // 💡 エラー内容を画面に生表示させる
+                    showRawError(data);
+                    alert("Google AI側でエラーが発生しました。画面上の赤いログを確認してください。");
                 }
 
             } catch (error) {
                 console.error(error);
                 video.play();
-                alert("Geminiとの通信エラーが発生しました。");
+                errorLog.innerText = error.toString();
+                errorLog.style.display = 'block';
+                alert("通信エラーが発生しました。");
             } finally {
                 showLoading(false);
                 btnSnap.disabled = false;
@@ -236,13 +265,14 @@
         }
 
         function clearAllData() {
-            if (confirm("登録した商品リストとAPIキーをすべて削除しますか？")) {
+            if (confirm("すべてのデータを初期化しますか？")) {
                 localStorage.clear();
                 itemDictionary = {};
                 currentStock = {};
                 geminiApiKey = '';
                 document.getElementById('api-key-input').value = '';
                 document.getElementById('key-details').open = true;
+                errorLog.style.display = 'none';
                 updateStockTable();
                 alert("削除しました。");
             }
